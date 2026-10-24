@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "netstate-reconciler"
-version = "0.2.0"
+version = "0.3.0"
 description = "A desired-state configuration drift auditor and cautious remediation planner for Cisco IOS networks"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -15,9 +15,6 @@ dependencies = ["PyYAML>=6.0"]
 [project.optional-dependencies]
 ssh = ["netmiko>=4.3"]
 dev = ["pytest>=8.0", "ruff>=0.5"]
-
-[project.scripts]
-netstate = "netstate.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -30,3 +27,8 @@ addopts = "-ra"
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+
+[project.scripts]
+netstate = "netstate.cli:main"
+netstate-scheduled-audit = "netstate.scheduler:main"
+netstate-evaluate-corpus = "netstate.corpus_eval:main"

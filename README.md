@@ -210,3 +210,16 @@ tests/                             Unit tests
 ## License
 
 MIT. See `LICENSE`.
+
+## v0.3.0 advanced capabilities
+
+See [`docs/V0.3.0.md`](docs/V0.3.0.md) for details and evidence limitations.
+
+- Driver-agnostic remediation transactions with explicit approval, capability policies, checkpoints, verification, and rollback behavior (`netstate.transactions`).
+- Basic topology invariants (`netstate.topology`).
+- Labelled corpus evaluation and false-positive/false-negative metrics (`netstate-evaluate-corpus`).
+- Multi-device inventory and read-only SSH audits (`netstate.inventory`) with secrets sourced from environment variables.
+- Repeatable scheduled audits (`netstate-scheduled-audit`).
+- Opt-in live IOS-compatible SSH integration test.
+
+The bundled version-labelled fixtures are synthetic IOS-style samples, not real captures. The stateful virtual IOS test is skipped unless an SSH lab is configured. Do not claim real IOS release compatibility or real-device rollback validation until those tests have actually run against the target images.

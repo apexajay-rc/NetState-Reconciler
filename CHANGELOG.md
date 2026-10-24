@@ -12,3 +12,11 @@
 ## 0.1.0
 
 - Initial desired-state auditor, Cisco IOS parser, drift detector, remediation planner, optional Netmiko collector, and conservative executor.
+
+## 0.3.0
+- Added driver-agnostic remediation transaction/checkpoint/rollback model with device capability policies.
+- Added basic topology invariants for duplicate IPs and invalid link endpoints.
+- Added confusion-matrix metrics and labelled parser corpus evaluator.
+- Added multi-device inventory validation, read-only SSH audit runner, and repeatable scheduled audit command.
+- Added opt-in IOS-compatible SSH integration test.
+- Added version-labelled synthetic corpus metadata; explicitly does not claim real release captures.
