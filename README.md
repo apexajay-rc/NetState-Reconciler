@@ -2,6 +2,8 @@
 
 **Automated Network Configuration Drift Detection and Remediation**
 
+Current release: **0.2.0**
+
 NetState Reconciler is a Python-based desired-state auditor for a bounded, documented subset of Cisco IOS running configurations. It compares an approved YAML specification with actual router configuration, reports drift with severity, and creates a reviewable remediation plan. It supports saved configuration exports (useful with Cisco Packet Tracer) and an optional SSH adapter for IOS devices/labs that support Netmiko.
 
 > **Scope and safety:** This is a portfolio/learning project, not a production NMS. Cisco Packet Tracer device CLI capabilities differ from physical IOS devices. The file collector is the supported Packet Tracer workflow; do not assume that Netmiko SSH access works with simulated Packet Tracer routers. The current planner does not auto-apply ACL or OSPF changes, interface IP changes, interface administrative-state changes, or ACL-binding changes. Those changes are deliberately marked for manual review because they can change reachability or interrupt traffic.
@@ -10,7 +12,10 @@ NetState Reconciler is a Python-based desired-state auditor for a bounded, docum
 
 - YAML desired-state validation with actionable errors.
 - Parser for hostname, interface IPv4 address/mask, admin state, descriptions, inbound/outbound ACL bindings, numbered/named ACL entries, and OSPF router ID/network statements.
-- Ordered ACL comparison; entry order is treated as meaningful.
+- Fail-safe parser diagnostics for unsupported interface commands, unsupported OSPF subcommands, and known security/routing-sensitive global configuration outside the modeled subset.
+- Ordered ACL comparison; the planner proposes a full ordered rebuild when numbered ACL entries differ in order, and keeps ACL changes manual-review-only.
+- Validation of contiguous IPv4 subnet masks and interface ACL binding directions; numeric ACL bindings are normalized to strings.
+- Explicit `null` desired values represent absent nullable properties such as an interface address or description.
 - Drift findings with paths, desired/actual values, severity, and explanations.
 - Strict resource mode for flagging undeclared interfaces, ACLs, and OSPF processes.
 - Remediation planning with command suggestions and explicit manual-review boundaries.
@@ -164,7 +169,7 @@ Exit codes: `0` means the audit is compliant (or validation succeeded); `1` mean
 
 This version models a defined subset of IOS configuration, not every IOS command or platform. It does not fully model secondary IPv4 addresses, DHCP addressing, IPv6, NAT, BGP, route maps, VRFs, VLAN trunking, AAA, all ACL syntax variants, or operational state such as physical link-up. Secondary/DHCP interface addressing produces a parser warning. An audit with parser warnings requires human review; a clean result is only as complete as the parser's supported configuration model.
 
-The current desired-state comparison treats lists as ordered and dictionaries as a set of managed keys. It does not prove full network reachability or formally verify that an ACL's effective policy meets a business security intent. `strict: true` catches extra resources but does not treat every unmodeled command as drift.
+The current desired-state comparison treats lists as ordered and dictionaries as a set of managed keys. It does not prove full network reachability or formally verify that an ACL's effective policy meets a business security intent. `strict: true` catches extra resources but does not treat every unmodeled command as drift. Version 0.2.0 warns on known security/routing-sensitive global features and unknown commands inside modeled interface/OSPF contexts; an audit with parser warnings is marked incomplete and must not be treated as a clean compliance result. Some out-of-scope global commands are intentionally not flagged, and this is not a complete whole-device security audit.
 
 ## Repository layout
 
@@ -184,15 +189,24 @@ tests/fixtures/                   Synthetic Cisco IOS configuration samples
 tests/                             Unit tests
 ```
 
+## Version 0.2.0 changes
+
+- Unknown interface and OSPF subcommands now generate parser warnings instead of being silently ignored.
+- Selected out-of-scope global features that can affect security or routing (for example, AAA, local users, management access, static routes, NAT, and alternate routing protocols) generate warnings.
+- Common Packet Tracer `duplex` and `speed` defaults are ignored intentionally; they are not managed properties in this schema.
+- Invalid non-contiguous IPv4 subnet masks and invalid ACL binding directions are rejected during desired-state validation.
+- Explicit `null` for supported nullable properties matches an absent configuration field.
+- Numbered ACL remediation plans rebuild the full ordered entry list when order differs, rather than only adding/removing set-membership differences. ACL modifications remain manual-review-only.
+- Regression suite expanded from 13 to 22 tests.
+
 ## Suggested next engineering improvements
 
-1. Add broader IOS syntax coverage with parser fixtures from multiple IOS versions.
-2. Replace raw interface/ACL parsing with a structured AST and explicit unsupported-command coverage.
-3. Add stateful integration tests using a virtual IOS-compatible lab.
-4. Build a remediation transaction model with checkpoints, rollback, and device-specific capability policies.
-5. Add topology-aware validation and policy invariants, then measure false positives and false negatives on a labelled test corpus.
+1. Add parser fixtures captured from multiple IOS/IOSv versions and a version-labelled test corpus.
+2. Add stateful integration tests using a virtual IOS-compatible lab.
+3. Build a remediation transaction model with checkpoints, rollback, and device-specific capability policies.
+4. Add topology-aware validation and policy invariants, then measure false positives and false negatives on a labelled test corpus.
+5. Add multi-device inventory and repeatable scheduled audits after device collection has been verified.
 
 ## License
 
 MIT. See `LICENSE`.
-# NetState-Reconciler

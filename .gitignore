@@ -9,3 +9,5 @@ build/
 .env
 reports/
 live_configs/
+.env.*
+.DS_Store

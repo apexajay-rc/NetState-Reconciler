@@ -47,6 +47,10 @@ def compare_states(desired: dict[str, Any], actual: dict[str, Any]) -> list[Drif
             for key, expected_value in wanted.items():
                 child = f"{path}.{key}" if path else str(key)
                 if key not in observed:
+                    # Explicit null means "this property should be absent" for nullable
+                    # modeled fields such as an IP address or interface description.
+                    if expected_value is None:
+                        continue
                     findings.append(Drift(child, expected_value, None, _severity(child), f"Required configuration is missing at {child}."))
                 else:
                     walk(expected_value, observed[key], child)

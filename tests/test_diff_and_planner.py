@@ -70,3 +70,33 @@ def test_planner_does_not_remove_undeclared_outbound_acl_binding():
     commands = [command for action in actions for command in action.commands]
     assert "no ip access-group 200 out" not in commands
     assert "description Changed" in commands
+
+
+def test_nullable_properties_match_absent_actual_fields():
+    desired = {
+        "interfaces": {
+            "GigabitEthernet0/1": {
+                "ipv4_address": None,
+                "ipv4_mask": None,
+                "description": None,
+            }
+        }
+    }
+    actual = {"interfaces": {"GigabitEthernet0/1": {"admin_state": "down", "access_groups": {}}}}
+    assert compare_states(desired, actual) == []
+
+
+def test_numbered_acl_plan_rebuilds_entries_when_order_differs():
+    desired = load_desired(ROOT / "configs/router1.yaml")
+    actual = load_actual()
+    actual["acls"]["100"]["entries"] = list(reversed(actual["acls"]["100"]["entries"]))
+    drifts = compare_states(desired, actual)
+    actions = build_plan(desired, actual, drifts)
+    acl_action = next(action for action in actions if action.path == "acls.100")
+    wanted = desired["acls"]["100"]["entries"]
+    observed = actual["acls"]["100"]["entries"]
+    expected_commands = [f"no access-list 100 {entry}" for entry in observed]
+    expected_commands.extend(f"access-list 100 {entry}" for entry in wanted)
+    assert acl_action.commands == expected_commands
+    assert not acl_action.auto_applicable
+    assert acl_action.requires_approval

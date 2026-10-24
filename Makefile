@@ -1,4 +1,4 @@
-.PHONY: install test lint validate audit-baseline audit-drift plan-drift
+.PHONY: install test lint validate audit-baseline audit-drift plan-drift version
 
 install:
 	python -m pip install -e '.[dev]'
@@ -20,3 +20,6 @@ audit-drift:
 
 plan-drift:
 	-netstate plan --desired configs/router1.yaml --source tests/fixtures/router1_with_drift.txt --json-output reports/remediation-plan.json
+
+version:
+	netstate --version

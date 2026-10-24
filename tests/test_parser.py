@@ -54,3 +54,45 @@ interface GigabitEthernet0/0
 !
 """)
     assert any("outside the modeled subset" in warning for warning in parser.warnings)
+
+
+def test_unmodeled_security_sensitive_global_command_produces_warning():
+    parser = CiscoIOSParser()
+    parser.parse("""hostname R1
+username admin privilege 15 secret 5 REDACTED
+""")
+    assert any("may affect security or routing" in warning for warning in parser.warnings)
+
+
+def test_unmodeled_interface_command_produces_warning():
+    parser = CiscoIOSParser()
+    parser.parse("""hostname R1
+interface GigabitEthernet0/0
+ ip address 192.168.1.1 255.255.255.0
+ ip verify unicast source reachable-via rx
+!
+""")
+    assert any("ip verify unicast" in warning for warning in parser.warnings)
+
+
+def test_common_packet_tracer_duplex_and_speed_defaults_are_ignored():
+    parser = CiscoIOSParser()
+    parser.parse("""hostname R1
+interface GigabitEthernet0/0
+ ip address 192.168.1.1 255.255.255.0
+ duplex auto
+ speed auto
+!
+""")
+    assert not parser.warnings
+
+
+def test_unknown_ospf_command_produces_warning():
+    parser = CiscoIOSParser()
+    parser.parse("""hostname R1
+router ospf 1
+ router-id 1.1.1.1
+ passive-interface default
+!
+""")
+    assert any("OSPF command is outside the modeled subset" in warning for warning in parser.warnings)

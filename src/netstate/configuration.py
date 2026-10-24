@@ -54,21 +54,44 @@ def load_desired(path: str | Path) -> dict[str, Any]:
                 f"Interface '{name}' must declare ipv4_address and ipv4_mask together."
             )
         for ip_key in ("ipv4_address", "ipv4_mask"):
-            if ip_key in spec and spec[ip_key] is not None:
+            value = spec.get(ip_key)
+            if ip_key in spec and value is not None:
+                if not isinstance(value, str):
+                    raise DesiredStateError(f"Interface '{name}' {ip_key} must be a quoted IPv4 string or null.")
                 try:
-                    ipaddress.IPv4Address(spec[ip_key])
-                except (ipaddress.AddressValueError, TypeError) as exc:
-                    raise DesiredStateError(f"Interface '{name}' has invalid {ip_key}: {spec[ip_key]}") from exc
+                    ipaddress.IPv4Address(value)
+                except ipaddress.AddressValueError as exc:
+                    raise DesiredStateError(f"Interface '{name}' has invalid {ip_key}: {value}") from exc
         if "ipv4_address" in spec and ((spec["ipv4_address"] is None) != (spec["ipv4_mask"] is None)):
             raise DesiredStateError(
                 f"Interface '{name}' must set both IPv4 address and mask to values or both to null."
             )
+        if spec.get("ipv4_mask") is not None:
+            try:
+                ipaddress.IPv4Network(f"0.0.0.0/{spec['ipv4_mask']}")
+            except (ipaddress.NetmaskValueError, ipaddress.AddressValueError, ValueError) as exc:
+                raise DesiredStateError(
+                    f"Interface '{name}' ipv4_mask is not a contiguous IPv4 subnet mask: {spec['ipv4_mask']}"
+                ) from exc
         if "admin_state" in spec and str(spec["admin_state"]).lower() not in {"up", "down"}:
             raise DesiredStateError(f"Interface '{name}' admin_state must be 'up' or 'down'.")
         if "description" in spec and spec["description"] is not None and not isinstance(spec["description"], str):
             raise DesiredStateError(f"Interface '{name}' description must be a string or null.")
-        if "access_groups" in spec and not isinstance(spec["access_groups"], dict):
-            raise DesiredStateError(f"Interface '{name}' access_groups must be a mapping such as {{in: '100'}}.")
+        if "access_groups" in spec:
+            access_groups = spec["access_groups"]
+            if not isinstance(access_groups, dict):
+                raise DesiredStateError(
+                    f"Interface '{name}' access_groups must be a mapping such as {{in: '100'}}."
+                )
+            for direction, acl_name in access_groups.items():
+                if direction not in {"in", "out"}:
+                    raise DesiredStateError(
+                        f"Interface '{name}' access_groups direction must be 'in' or 'out', got '{direction}'."
+                    )
+                if acl_name is not None and not isinstance(acl_name, (str, int)):
+                    raise DesiredStateError(
+                        f"Interface '{name}' access group '{direction}' must be an ACL name/number or null."
+                    )
 
     acls = document.get("acls", {})
     for acl_name, acl_spec in acls.items():
@@ -125,7 +148,17 @@ def load_desired(path: str | Path) -> dict[str, Any]:
     # Canonicalize keys/values used by the parser and comparison engine.
     normalized = dict(document)
     if "interfaces" in document:
-        normalized["interfaces"] = {name: dict(spec) for name, spec in interfaces.items()}
+        normalized["interfaces"] = {}
+        for name, spec in interfaces.items():
+            normalized_spec = dict(spec)
+            if "admin_state" in normalized_spec:
+                normalized_spec["admin_state"] = str(normalized_spec["admin_state"]).lower()
+            if "access_groups" in normalized_spec:
+                normalized_spec["access_groups"] = {
+                    direction: None if acl_name is None else str(acl_name)
+                    for direction, acl_name in normalized_spec["access_groups"].items()
+                }
+            normalized["interfaces"][name] = normalized_spec
     if "acls" in document:
         normalized["acls"] = {}
         for name, spec in acls.items():

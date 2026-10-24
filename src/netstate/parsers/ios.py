@@ -15,6 +15,24 @@ _OSPF_RE = re.compile(r"^router\s+ospf\s+(\S+)", re.IGNORECASE)
 _NETWORK_RE = re.compile(r"^network\s+(\S+)\s+(\S+)\s+area\s+(\S+)\s*$", re.IGNORECASE)
 _ROUTER_ID_RE = re.compile(r"^router-id\s+(\S+)\s*$", re.IGNORECASE)
 
+# These global configuration features can change security posture or routing behavior, but
+# this version does not model them. Flag them rather than allowing a misleading clean audit.
+_UNMODELED_GLOBAL_PREFIXES = (
+    "username ", "enable secret", "enable password", "aaa ", "no aaa ", "line ",
+    "ip ssh ", "snmp-server ", "ip route ", "ip nat ", "ip dhcp ", "ipv6 ",
+    "crypto ", "tacacs-server ", "radius-server ", "ip http ", "no ip http ",
+    "service password-encryption", "no service password-encryption", "router bgp ",
+    "router eigrp ", "router rip", "route-map ", "ip policy ", "control-plane",
+    "spanning-tree ", "key chain ", "logging host ", "ntp ", "archive ", "track ",
+    "banner ", "ipv6 unicast-routing",
+)
+
+# Packet Tracer and IOS commonly emit these interface defaults. They are outside the
+# managed desired-state schema, but are not security/routing policy commands in this model.
+_IGNORED_INTERFACE_DEFAULT_PREFIXES = (
+    "duplex ", "speed ", "media-type ", "load-interval ",
+)
+
 
 def _clean_acl_entry(entry: str) -> str:
     """Normalize whitespace and remove an optional leading sequence number."""
@@ -100,6 +118,20 @@ class CiscoIOSParser:
                 current_acl_type = None
                 continue
 
+            # Any remaining unindented line starts a new global context. Previously, an
+            # unrecognized global command could be silently interpreted as an interface or
+            # OSPF subcommand (or silently ignored), which could yield false confidence.
+            if not raw_line[:1].isspace():
+                lowered = stripped.lower()
+                if any(lowered.startswith(prefix) for prefix in _UNMODELED_GLOBAL_PREFIXES):
+                    self.warnings.append(
+                        f"Line {line_number}: Global command is outside the modeled subset and "
+                        f"may affect security or routing: {stripped}"
+                    )
+                context = None
+                current_acl_type = None
+                continue
+
             if context is None:
                 continue
 
@@ -123,20 +155,21 @@ class CiscoIOSParser:
                     interface["admin_state"] = "up"
                 elif stripped.lower().startswith("description "):
                     interface["description"] = stripped[len("description "):]
-                elif any(stripped.lower().startswith(prefix) for prefix in (
-                    "ipv6 address ", "ip nat ", "ip helper-address ", "vrf forwarding ",
-                    "switchport ", "standby ", "channel-group ", "encapsulation ",
-                    "service-policy ", "ip ospf ", "ip policy ", "crypto map ",
-                )):
-                    self.warnings.append(
-                        f"Line {line_number}: Interface command is outside the modeled subset: {stripped}"
-                    )
                 elif stripped.lower() in {"no ip address", "no description"}:
                     if stripped.lower() == "no ip address":
                         interface.pop("ipv4_address", None)
                         interface.pop("ipv4_mask", None)
                     else:
                         interface.pop("description", None)
+                elif stripped.lower().startswith(_IGNORED_INTERFACE_DEFAULT_PREFIXES):
+                    # Common platform defaults are deliberately not managed by this schema.
+                    pass
+                else:
+                    # Do not silently ignore unknown interface commands: they may affect
+                    # reachability, security, routing, or forwarding semantics.
+                    self.warnings.append(
+                        f"Line {line_number}: Interface command is outside the modeled subset: {stripped}"
+                    )
             elif kind == "named_acl":
                 entry = _clean_acl_entry(stripped)
                 if entry:
@@ -151,10 +184,10 @@ class CiscoIOSParser:
                     )
                 elif router_id_match:
                     state["ospf"][key]["router_id"] = router_id_match.group(1)
-                elif any(stripped.lower().startswith(prefix) for prefix in (
-                    "passive-interface", "redistribute ", "default-information ", "area ",
-                    "authentication", "summary-address ", "timers ", "maximum-paths ",
-                )):
+                elif stripped.lower() == "log-adjacency-changes":
+                    # Logging-only default; no route selection or adjacency policy is modeled.
+                    pass
+                else:
                     self.warnings.append(
                         f"Line {line_number}: OSPF command is outside the modeled subset: {stripped}"
                     )

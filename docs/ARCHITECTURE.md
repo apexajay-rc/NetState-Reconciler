@@ -50,3 +50,10 @@ Packet Tracer is a useful topology simulator, but simulated device services are 
 ## Remediation risk model
 
 The planner treats hostname/description-only commands as eligible for application after explicit confirmation. Interface IP changes, interface shutdown/no-shutdown, ACL binding changes, ACL edits, and OSPF drift require manual review. These operations can affect reachability, rule ordering, or route propagation. Planner output is not a guarantee that commands will be accepted by every IOS version; always test in an isolated lab.
+
+
+## Version 0.2.0 safety behavior
+
+The parser emits warnings for unknown commands within interface and OSPF contexts and for selected global configuration features that materially affect security or routing but are not modeled by the desired-state schema. CLI audit reports with parser warnings are marked incomplete rather than compliant. The global-command checks are intentionally targeted, not exhaustive; absence of a warning is not proof that every IOS feature was audited.
+
+Numbered ACL entries are ordered policy. When an ACL diff is detected, the planner proposes removing the current entries and re-adding the desired list in order. Such actions remain manual-review-only because updating an applied ACL can temporarily alter traffic filtering.

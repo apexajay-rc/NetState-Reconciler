@@ -115,17 +115,25 @@ def build_plan(desired: dict[str, Any], actual: dict[str, Any], drifts: list[Dri
             actual_entries = observed.get("entries", []) if isinstance(observed, dict) else observed
             commands: list[str] = []
             if isinstance(wanted_entries, list):
+                observed_entries = actual_entries if isinstance(actual_entries, list) else []
                 if acl_name.isdigit():
-                    for entry in actual_entries if isinstance(actual_entries, list) else []:
-                        if entry not in wanted_entries:
-                            commands.append(f"no access-list {_quote_cli(acl_name)} {_quote_cli(entry)}")
-                    for entry in wanted_entries:
-                        if entry not in actual_entries:
-                            commands.append(f"access-list {_quote_cli(acl_name)} {_quote_cli(entry)}")
+                    # ACL order is semantically significant. A membership-only diff is not
+                    # enough: if the same ACEs appear in a different order, adding/removing
+                    # only missing entries cannot restore the desired order. Because this
+                    # action is manual-review-only, propose a complete ordered rebuild.
+                    if observed_entries != wanted_entries:
+                        commands.extend(
+                            f"no access-list {_quote_cli(acl_name)} {_quote_cli(entry)}"
+                            for entry in observed_entries
+                        )
+                        commands.extend(
+                            f"access-list {_quote_cli(acl_name)} {_quote_cli(entry)}"
+                            for entry in wanted_entries
+                        )
                 else:
                     acl_type = wanted.get("type", "extended") if isinstance(wanted, dict) else "extended"
                     commands.append(f"ip access-list {_quote_cli(acl_type)} {_quote_cli(acl_name)}")
-                    commands.extend(f"no {_quote_cli(entry)}" for entry in (actual_entries if isinstance(actual_entries, list) else []))
+                    commands.extend(f"no {_quote_cli(entry)}" for entry in observed_entries)
                     commands.extend(_quote_cli(entry) for entry in wanted_entries)
                     commands.append("exit")
             actions.append(RemediationAction(
