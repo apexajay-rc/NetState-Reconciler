@@ -1,0 +1,22 @@
+Building configuration...
+!
+hostname Router1
+!
+interface GigabitEthernet0/0
+ description Uplink to LAN
+ ip address 192.168.1.99 255.255.255.0
+ ip access-group 100 in
+!
+interface GigabitEthernet0/1
+ ip address 10.0.0.1 255.255.255.0
+ shutdown
+!
+access-list 100 permit ip 10.0.0.0 0.255.255.255 any
+access-list 100 permit tcp any any eq 22
+access-list 100 deny ip any any log
+!
+router ospf 1
+ router-id 1.1.1.1
+ network 192.168.1.0 0.0.0.255 area 0
+!
+end
