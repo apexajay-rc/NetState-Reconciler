@@ -30,15 +30,21 @@ Packet Tracer's IOS command support varies by model and simulated IOS version. T
 
 ## Requirements
 
-- Ubuntu/Linux desktop (the tested operating environment for this project).
+### Common requirements
+
 - Python 3.11 or newer.
-- Cisco Packet Tracer installed.
-- Packet Tracer MCP server `packet-tracer-mcp==0.10.2` and the matching MCP Control Center extension.
+- Cisco Packet Tracer 8.2 or newer (Packet Tracer 9.0 is recommended for the pinned MCP integration).
+- Packet Tracer MCP server `packet-tracer-mcp==0.10.2` and its matching MCP Control Center extension.
 - A manually created Packet Tracer topology, or compatible topology builder tools exposed by the installed MCP server.
 
 The MCP HTTP endpoint defaults to `http://127.0.0.1:39400/mcp`. The Packet Tracer bridge is a separate service, normally on port `54321`. The application discovers the runtime tool catalog; availability of individual tools depends on the installed MCP server and extension versions.
 
-## Installation (Ubuntu)
+### Platform status
+
+- **Ubuntu/Linux:** the project's primary development and tested environment. Use the Bash scripts documented below.
+- **Windows 10/11:** native PowerShell installation and manual startup instructions are provided in this README and [`docs/WINDOWS_SETUP.md`](docs/WINDOWS_SETUP.md). The upstream Packet Tracer MCP package documents Windows 11 support, but the complete NetState + Packet Tracer live workflow has not yet been independently acceptance-tested by this project on Windows. Verify the MCP bridge and live topology on the target machine before relying on it for a demo.
+
+## Installation (Ubuntu/Linux)
 
 Install system prerequisites:
 
@@ -58,7 +64,137 @@ chmod +x install.sh start_netstate.sh stop_netstate.sh
 
 The installer creates a project-local `.venv` and installs the project plus development dependencies. The Packet Tracer MCP Control Center extension is installed inside Packet Tracer; see [`docs/MCP_SETUP.md`](docs/MCP_SETUP.md).
 
-## Start and connect
+## Installation (Windows 10/11)
+
+Run these commands in **PowerShell** (Windows Terminal is suitable). Do not use the `.sh` scripts from native PowerShell; those scripts are for Linux/Bash.
+
+### 1. Install prerequisites
+
+Install:
+
+- Python 3.11 or newer from [python.org](https://www.python.org/downloads/windows/). During setup, enable **Add python.exe to PATH**. The Python Launcher (`py`) is useful for selecting a specific Python version.
+- Git for Windows from [git-scm.com](https://git-scm.com/download/win), if you plan to clone the repository.
+- Graphviz. With Windows Package Manager:
+
+  ```powershell
+  winget install -e --id Graphviz.Graphviz
+  ```
+
+  Alternatively, use the official [Graphviz Windows installer](https://graphviz.org/download/). After installation, close and reopen PowerShell, then confirm `dot -V` works.
+- Cisco Packet Tracer. Packet Tracer 9.0 is recommended for this project.
+
+Verify the tools:
+
+```powershell
+py -3.11 --version
+git --version
+dot -V
+```
+
+If your Python installation is newer than 3.11, replace `-3.11` with the installed supported version. Python 3.11+ is required.
+
+### 2. Clone the repository
+
+```powershell
+git clone https://github.com/apexajay-rc/NetState-Reconciler.git
+Set-Location .\NetState-Reconciler
+```
+
+You can also download the repository ZIP from GitHub and extract it; Git is only required for cloning and later updates.
+
+### 3. Create the virtual environment and install dependencies
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip wheel
+.\.venv\Scripts\python.exe -m pip install -e ".[dev]"
+
+New-Item -ItemType Directory -Force -Path @(
+    ".netstate\checkpoints",
+    ".netstate\reports",
+    ".netstate\snapshots",
+    "logs"
+) | Out-Null
+```
+
+This uses the virtual environment's Python directly, so PowerShell script-execution policy changes are not required. If you prefer to activate the environment instead, run:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
+
+If PowerShell blocks activation, either keep using the explicit `.venv\Scripts\python.exe` commands above or allow scripts for the current PowerShell process only:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
+```
+
+### 4. Install and enable the Packet Tracer extension
+
+The Python package installs the MCP server; the Packet Tracer extension is a separate component.
+
+1. Download the MCP Control Center `.pts` extension from the [Packet Tracer MCP releases](https://github.com/Mats2208/MCP-Packet-Tracer/releases). Use the extension version documented as compatible with the pinned `packet-tracer-mcp==0.10.2` server; see [`docs/MCP_SETUP.md`](docs/MCP_SETUP.md).
+2. Fully exit Packet Tracer before adding a new script module.
+3. Start Packet Tracer and open **Extensions → Scripting → Configure PT Script Modules → Add**.
+4. Select the downloaded `.pts` file and confirm.
+5. Restart Packet Tracer if prompted, accept/enable the detected module, then open **Extensions → MCP BUILDER**.
+6. Confirm that the MCP Control Center reports a connected bridge.
+
+The bridge is a separate process from the Python HTTP MCP server. A listening port alone does not prove that the Packet Tracer extension is connected.
+
+### 5. Start the MCP server (PowerShell window 1)
+
+From the project directory:
+
+```powershell
+.\.venv\Scripts\python.exe -u -m packet_tracer_mcp
+```
+
+Keep this PowerShell window open. The server should expose the default HTTP endpoint:
+
+```text
+http://127.0.0.1:39400/mcp
+```
+
+If port `39400` is already occupied by a compatible MCP server, do not start a second copy. Check which process owns the port and use the existing server only if it is the expected Packet Tracer MCP instance.
+
+### 6. Start the NetState interface (PowerShell window 2)
+
+Open a second PowerShell window, change to the same project directory, and run:
+
+```powershell
+$env:NETSTATE_MCP_ENDPOINT = "http://127.0.0.1:39400/mcp"
+$env:NETSTATE_PORT = "8501"
+.\.venv\Scripts\python.exe -m streamlit run app.py --server.address 127.0.0.1 --server.port 8501 --server.headless true
+```
+
+Open **http://127.0.0.1:8501** in your browser.
+
+In Packet Tracer, keep **Extensions → MCP BUILDER** open and connected. In NetState, click **Connect & inspect MCP**. Confirm topology discovery returns the devices and links from the open Packet Tracer project before attempting configuration or drift simulation.
+
+### 7. Stop the Windows processes
+
+Press **Ctrl+C** in the Streamlit PowerShell window, then press **Ctrl+C** in the MCP server PowerShell window. Packet Tracer itself can remain open.
+
+### Windows troubleshooting
+
+Check whether the local services are listening:
+
+```powershell
+Test-NetConnection 127.0.0.1 -Port 39400
+Test-NetConnection 127.0.0.1 -Port 54321
+```
+
+- If Python is not found, reopen the terminal after installing Python or use the Python Launcher (`py -3.11`).
+- If `dot` is not found, Graphviz is not on `PATH`; reinstall Graphviz or add its `bin` directory to `PATH`, then reopen PowerShell.
+- If the MCP server starts but discovery is empty, confirm Packet Tracer is open, MCP BUILDER is enabled, and the bridge reports connected.
+- If port `39400` is occupied, identify the process before stopping it. Do not kill an unrelated service.
+- If a command is rejected by the simulated IOS, inspect the exact CLI error. Packet Tracer support varies by device model and simulated IOS version; do not rerun a large configuration transaction blindly.
+
+For extension compatibility and bridge diagnostics, see [`docs/MCP_SETUP.md`](docs/MCP_SETUP.md).
+
+## Start and connect (Ubuntu/Linux)
 
 ```bash
 ./start_netstate.sh
@@ -96,10 +232,19 @@ For the exact ACL demonstration, see [`docs/DRIFT_RECONCILIATION.md`](docs/DRIFT
 
 ## Testing
 
+Ubuntu/Linux:
+
 ```bash
 source .venv/bin/activate
 python -m compileall -q app.py src
 python -m pytest -q
+```
+
+Windows PowerShell:
+
+```powershell
+.\.venv\Scripts\python.exe -m compileall -q app.py src
+.\.venv\Scripts\python.exe -m pytest -q
 ```
 
 The automated suite tests parsing, intent validation, topology mapping, MCP response handling, configuration compilation, drift analysis, controlled simulation, remediation planning and read-back logic. Unit tests do not replace a live acceptance test against the exact Packet Tracer model, MCP server and extension installed on the target machine.
@@ -117,7 +262,8 @@ NetState-Reconciler/
 │   ├── DEMO_RUNBOOK.md
 │   ├── DRIFT_RECONCILIATION.md
 │   ├── MCP_SETUP.md
-│   └── SAFETY_AND_LIMITATIONS.md
+│   ├── SAFETY_AND_LIMITATIONS.md
+│   └── WINDOWS_SETUP.md
 ├── src/netstate_reconciler/
 │   ├── binding.py
 │   ├── compiler.py
