@@ -1,20 +1,26 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=69", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "netstate-reconciler"
-version = "0.3.0"
-description = "A desired-state configuration drift auditor and cautious remediation planner for Cisco IOS networks"
+version = "1.2.0"
+description = "Desired-state Cisco Packet Tracer configuration drift detection and reconciliation"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = {text = "MIT"}
-authors = [{name = "NetState Reconciler contributors"}]
-dependencies = ["PyYAML>=6.0"]
+authors = [{name = "NetState Reconciler Project"}]
+dependencies = [
+  "streamlit>=1.40,<2",
+  "graphviz>=0.20,<1",
+  "PyYAML>=6.0,<7",
+  "pydantic>=2.11,<3",
+  "mcp>=1.13,<2",
+  "packet-tracer-mcp==0.10.2",
+]
 
 [project.optional-dependencies]
-ssh = ["netmiko>=4.3"]
-dev = ["pytest>=8.0", "ruff>=0.5"]
+dev = ["pytest>=8.0,<10", "pytest-cov>=5,<8", "ruff>=0.8,<1"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -26,9 +32,7 @@ addopts = "-ra"
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 
-[project.scripts]
-netstate = "netstate.cli:main"
-netstate-scheduled-audit = "netstate.scheduler:main"
-netstate-evaluate-corpus = "netstate.corpus_eval:main"
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]

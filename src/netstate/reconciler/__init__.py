@@ -1,1 +1,0 @@
-"""Desired-state drift analysis."""

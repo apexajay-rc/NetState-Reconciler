@@ -1,59 +1,70 @@
-# Architecture and design decisions
+# Architecture
 
-## Data flow
+## Architectural style
+
+NetState is a local modular monolith. The Streamlit GUI, desired-state model, topology binding, configuration compiler, MCP adapter, drift engine, reconciliation planner and evidence store run in one Python application while remaining separate modules for testing.
+
+## Runtime flow
 
 ```text
-Approved YAML
-     |
-     v
-Schema validation -------------------------+
-     |                                     |
-     v                                     |
-Desired state                              |
-                                           v
-Saved config / SSH collector -> IOS parser -> Actual state
-                                           |
-                                           v
-                                  Desired/actual diff
-                                           |
-                            +--------------+--------------+
-                            |                             |
-                            v                             v
-                       Audit report                 Remediation planner
-                                                          |
-                                            +-------------+-------------+
-                                            |                           |
-                                            v                           v
-                                      Safe command set             Manual review
-                                            |
-                                            v
-                                 Explicitly confirmed executor
-                                            |
-                                            v
-                                  Re-collect and re-audit
+Streamlit UI
+    |
+    v
+Workflow controller
+    |
+    +--> MCP tool catalog and Packet Tracer bridge
+    |
+    +--> Topology discovery --> device/interface/link inventory
+    |
+    +--> YAML intent --> schema validation --> logical-to-physical binding
+    |
+    +--> Configuration preview --> approval --> checkpointed execution
+    |
+    +--> Desired-state baseline
+    |        |
+    |        v
+    |    Live running-config collection
+    |        |
+    |        v
+    |    Semantic comparison (1.2.0: named router ACL attachments)
+    |        |
+    |        v
+    |    Drift findings --> minimal remediation plan --> approval
+    |                                             |
+    |                                             v
+    |                                    Apply and read back
+    |                                             |
+    |                                             v
+    |                                    Verification evidence
+    |
+    +--> Reachability, health and security-posture diagnostics
+    |
+    +--> Local evidence store
 ```
 
-## Main invariants
+## Desired state and topology binding
 
-- Audit is read-only.
-- Plan is read-only and emits recommendations only.
-- `apply` requires `--confirm` and only executes planner actions marked `auto_applicable`.
-- ACL and OSPF changes are never auto-applied in this version.
-- A follow-up audit is required; a successful CLI response alone is not proof of compliance.
-- Only declared fields are managed; the YAML's `strict` option also detects unexpected interface, ACL, and OSPF resource objects.
-- ACL entries are compared in order.
+The user declares target state in YAML. `binding.py` maps logical router, switch and host roles to discovered Packet Tracer devices, and maps logical interface identifiers to actual discovered ports. Cisco interface aliases are normalized for comparison while the discovered spelling is retained for CLI output. Ambiguous mappings require operator selection.
 
-## Why file input exists
+## Configuration compiler and execution
 
-Packet Tracer is a useful topology simulator, but simulated device services are not equivalent to physical Cisco IOS. File input decouples the parser and reconciliation logic from the collection transport so they can be tested using exported `show running-config` text. The SSH adapter is optional and targets a device/lab that exposes a compatible SSH CLI.
+The compiler converts supported structured intent fields into IOS command plans. The UI exposes the plan and requires explicit approval. Checkpoints are captured where supported. Commands execute sequentially and the application stops at a recognized failure. The workflow records partial progress; it does not claim atomic multi-device rollback.
 
-## Remediation risk model
+## Reconciliation engine (1.2.0)
 
-The planner treats hostname/description-only commands as eligible for application after explicit confirmation. Interface IP changes, interface shutdown/no-shutdown, ACL binding changes, ACL edits, and OSPF drift require manual review. These operations can affect reachability, rule ordering, or route propagation. Planner output is not a guarantee that commands will be accepted by every IOS version; always test in an isolated lab.
+The first semantic control parses interface stanzas, named IPv4 ACL definitions and `ip access-group` attachments from live router configuration. It compares mapped desired ACL attachments with the observed state. A narrow repair is generated only when the interface and desired ACL definition are present and the observed configuration is complete enough to support the operation. After approval, the engine applies the attachment command and retrieves running configuration again. `VERIFIED` requires the read-back to match the targeted desired state.
 
+Other configuration families are outside the 1.2.0 semantic reconciliation scope. They must not be reported as semantically compliant merely because no supported ACL drift was found.
 
-## Version 0.2.0 safety behavior
+## Evidence and local state
 
-The parser emits warnings for unknown commands within interface and OSPF contexts and for selected global configuration features that materially affect security or routing but are not modeled by the desired-state schema. CLI audit reports with parser warnings are marked incomplete rather than compliant. The global-command checks are intentionally targeted, not exhaustive; absence of a warning is not proof that every IOS feature was audited.
+The application stores topology snapshots, redacted running-config snapshots, device/interface mappings, checkpoints and execution reports under `.netstate/`. Logs are stored under `logs/`. These runtime directories are private local state and must not be committed to Git.
 
-Numbered ACL entries are ordered policy. When an ACL diff is detected, the planner proposes removing the current entries and re-adding the desired list in order. Such actions remain manual-review-only because updating an applied ACL can temporarily alter traffic filtering.
+## Trust boundaries and limits
+
+- MCP endpoint defaults to localhost; bridge connectivity is checked separately.
+- Live configuration changes require explicit approval.
+- The compiler accepts structured intent rather than arbitrary CLI blocks.
+- Packet Tracer command support varies by simulated model and IOS version.
+- Command submission is not proof of configuration correctness; read-back is required.
+- The project is an educational Packet Tracer demonstrator, not a complete multi-vendor network configuration management platform.

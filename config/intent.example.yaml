@@ -1,0 +1,124 @@
+# NetState declarative network intent.
+# Replace device names and physical interface identifiers with values from topology discovery.
+# Passwords and secrets are entered in the GUI at execution time and are not stored in this file.
+
+name: Enterprise-Segmented-Lab
+
+routers:
+  R1:
+    interfaces:
+      GigabitEthernet0/0:
+        description: TRUNK_TO_SW1
+        enabled: true
+      GigabitEthernet0/1:
+        ipv4: 10.10.0.1/30
+        description: TRANSIT_TO_R2
+        enabled: true
+    subinterfaces:
+      GigabitEthernet0/0.10:
+        parent_interface: GigabitEthernet0/0
+        vlan: 10
+        ipv4: 10.10.10.1/24
+        description: EMPLOYEES_GATEWAY
+      GigabitEthernet0/0.20:
+        parent_interface: GigabitEthernet0/0
+        vlan: 20
+        ipv4: 10.10.20.1/24
+        description: GUEST_GATEWAY
+    ospf:
+      process_id: 1
+      router_id: 1.1.1.1
+      area: 0
+      networks:
+        - 10.10.0.0/30
+        - 10.10.10.0/24
+        - 10.10.20.0/24
+    dhcp_scopes:
+      - name: EMPLOYEES
+        network: 10.10.10.0/24
+        default_router: 10.10.10.1
+        dns_server: 8.8.8.8
+        excluded: [10.10.10.1]
+      - name: GUEST
+        network: 10.10.20.0/24
+        default_router: 10.10.20.1
+        dns_server: 8.8.8.8
+        excluded: [10.10.20.1]
+    acls:
+      - name: GUEST_TO_FINANCE
+        interface: GigabitEthernet0/0.20
+        direction: in
+        rules:
+          - action: deny
+            protocol: ip
+            source: 10.10.20.0/24
+            destination: 10.10.30.0/24
+          - action: permit
+            protocol: ip
+            source: any
+            destination: any
+        append_permit_any: false
+
+  R2:
+    interfaces:
+      GigabitEthernet0/0:
+        ipv4: 10.10.0.2/30
+        description: TRANSIT_TO_R1
+        enabled: true
+      GigabitEthernet0/1:
+        ipv4: 10.10.30.1/24
+        description: FINANCE_LAN
+        enabled: true
+    ospf:
+      process_id: 1
+      router_id: 2.2.2.2
+      area: 0
+      networks:
+        - 10.10.0.0/30
+        - 10.10.30.0/24
+    dhcp_scopes:
+      - name: FINANCE
+        network: 10.10.30.0/24
+        default_router: 10.10.30.1
+        dns_server: 8.8.8.8
+        excluded: [10.10.30.1, 10.10.30.10]
+
+switches:
+  SW1:
+    vlans:
+      - id: 10
+        name: EMPLOYEES
+      - id: 20
+        name: GUEST
+    access_ports:
+      - interface: FastEthernet0/1
+        vlan: 10
+      - interface: FastEthernet0/2
+        vlan: 20
+    trunk_ports:
+      - interface: GigabitEthernet0/1
+        allowed_vlans: [10, 20]
+    enable_port_security: true
+    port_security_max: 2
+  SW2:
+    vlans:
+      - id: 30
+        name: FINANCE
+    access_ports:
+      - interface: FastEthernet0/1
+        vlan: 30
+      - interface: GigabitEthernet0/1
+        vlan: 30
+    enable_port_security: true
+    port_security_max: 2
+
+hosts:
+  PC-EMPLOYEE:
+    mode: dhcp
+  PC-GUEST:
+    mode: dhcp
+  PC-FINANCE:
+    mode: static
+    ipv4: 10.10.30.10/24
+    gateway: 10.10.30.1
+    dns_server: 8.8.8.8

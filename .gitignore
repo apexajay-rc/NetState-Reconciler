@@ -1,13 +1,21 @@
 .venv/
+.venv-*/
 __pycache__/
-*.py[cod]
 .pytest_cache/
 .ruff_cache/
+.mypy_cache/
+.netstate/
+logs/
+*.py[cod]
 *.egg-info/
-dist/
-build/
 .env
-reports/
-live_configs/
-.env.*
 .DS_Store
+
+# Packet Tracer and network-capture lab artifacts
+*.pkt
+*.pka
+*.pcap
+*.pcapng
+*.checkpoint
+*.checkpoint.json
+*.log

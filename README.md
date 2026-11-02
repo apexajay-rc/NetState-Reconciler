@@ -1,225 +1,153 @@
 # NetState Reconciler
 
-**Automated Network Configuration Drift Detection and Remediation**
+**Desired-state configuration drift detection and remediation for Cisco Packet Tracer labs.**
 
-Current release: **0.2.0**
+NetState Reconciler discovers a Packet Tracer topology, maps logical network roles to the devices and interfaces that actually exist, compares selected live configuration state with a saved desired state, and guides an operator through a narrow remediation and read-back verification workflow.
 
-NetState Reconciler is a Python-based desired-state auditor for a bounded, documented subset of Cisco IOS running configurations. It compares an approved YAML specification with actual router configuration, reports drift with severity, and creates a reviewable remediation plan. It supports saved configuration exports (useful with Cisco Packet Tracer) and an optional SSH adapter for IOS devices/labs that support Netmiko.
+> **Current scope (1.2.0):** the first semantic reconciliation control covers named router ACL attachments. It is an educational lab demonstrator, not a vendor-independent network automation platform or a complete IOS configuration verifier.
 
-> **Scope and safety:** This is a portfolio/learning project, not a production NMS. Cisco Packet Tracer device CLI capabilities differ from physical IOS devices. The file collector is the supported Packet Tracer workflow; do not assume that Netmiko SSH access works with simulated Packet Tracer routers. The current planner does not auto-apply ACL or OSPF changes, interface IP changes, interface administrative-state changes, or ACL-binding changes. Those changes are deliberately marked for manual review because they can change reachability or interrupt traffic.
+## What it does
 
-## Features
+- Discovers Packet Tracer devices, interfaces, IP information and physical links through the Packet Tracer MCP integration.
+- Supports capability-aware topology planning where compatible MCP planning/deployment tools are available.
+- Maps logical intent roles (such as `R1`, `SW1`, or `PC-GUEST`) to the actual discovered Packet Tracer device names.
+- Resolves logical interface references to discovered physical interfaces, including common Cisco interface abbreviations.
+- Uses YAML to describe a supported desired network configuration: router interfaces and subinterfaces, OSPF, static routes, DHCP scopes, ACLs, VLANs, switch access/trunk ports, basic port security and host IPv4 settings.
+- Shows generated configuration plans and requires operator approval before live changes.
+- Saves local checkpoints where the MCP server supports them and stops a multi-device execution after a recognised command failure.
+- Saves a desired-state baseline and compares it with fresh live router configuration for the supported ACL-attachment control.
+- Simulates removal of a selected ACL attachment after precondition checks and explicit operator approval.
+- Generates a minimal ACL reattachment command and reports `VERIFIED` only when a fresh running-config read-back confirms the intended attachment.
+- Provides reachability, security-posture and topology-drift utilities as supporting diagnostic features.
 
-- YAML desired-state validation with actionable errors.
-- Parser for hostname, interface IPv4 address/mask, admin state, descriptions, inbound/outbound ACL bindings, numbered/named ACL entries, and OSPF router ID/network statements.
-- Fail-safe parser diagnostics for unsupported interface commands, unsupported OSPF subcommands, and known security/routing-sensitive global configuration outside the modeled subset.
-- Ordered ACL comparison; the planner proposes a full ordered rebuild when numbered ACL entries differ in order, and keeps ACL changes manual-review-only.
-- Validation of contiguous IPv4 subnet masks and interface ACL binding directions; numeric ACL bindings are normalized to strings.
-- Explicit `null` desired values represent absent nullable properties such as an interface address or description.
-- Drift findings with paths, desired/actual values, severity, and explanations.
-- Strict resource mode for flagging undeclared interfaces, ACLs, and OSPF processes.
-- Remediation planning with command suggestions and explicit manual-review boundaries.
-- Optional Netmiko SSH collection and conservative execution of only planner-approved actions.
-- Post-remediation audit, JSON report output, and pytest tests.
+## Current reconciliation scope and limitations
 
-## Quick start (Ubuntu)
+Version 1.2.0 semantically detects and reconciles **named IPv4 ACL attachments on router interfaces**. It can identify a missing or incorrect `ip access-group <name> in|out` attachment, provided the relevant interface and ACL definition can be read from the device configuration. Automatic repair is refused when required evidence is missing or incomplete.
+
+The following are **not yet covered by the semantic reconciler**: VLAN membership, trunk allowed-VLAN lists, DHCP scopes, OSPF, static routes, switch port security, host addressing, and arbitrary IOS commands. Topology and redacted running-config snapshots can be compared as supporting evidence, but a textual diff is not the same as semantic verification. Do not interpret an unsupported field as compliant.
+
+Packet Tracer's IOS command support varies by model and simulated IOS version. The project does not claim atomic multi-device rollback. A submitted command is not proof of application; fresh read-back and appropriate connectivity checks are required.
+
+## Requirements
+
+- Ubuntu/Linux desktop (the tested operating environment for this project).
+- Python 3.11 or newer.
+- Cisco Packet Tracer installed.
+- Packet Tracer MCP server `packet-tracer-mcp==0.10.2` and the matching MCP Control Center extension.
+- A manually created Packet Tracer topology, or compatible topology builder tools exposed by the installed MCP server.
+
+The MCP HTTP endpoint defaults to `http://127.0.0.1:39400/mcp`. The Packet Tracer bridge is a separate service, normally on port `54321`. The application discovers the runtime tool catalog; availability of individual tools depends on the installed MCP server and extension versions.
+
+## Installation (Ubuntu)
+
+Install system prerequisites:
 
 ```bash
 sudo apt update
-sudo apt install -y python3 python3-venv python3-pip git
-cd ~/projects
-# If you cloned this repository, cd into the cloned directory instead.
-cd netstate-reconciler
-python3 -m venv .venv
+sudo apt install -y python3 python3-venv python3-pip graphviz git
+```
+
+Clone the repository and install dependencies:
+
+```bash
+git clone https://github.com/apexajay-rc/NetState-Reconciler.git
+cd NetState-Reconciler
+chmod +x install.sh start_netstate.sh stop_netstate.sh
+./install.sh
+```
+
+The installer creates a project-local `.venv` and installs the project plus development dependencies. The Packet Tracer MCP Control Center extension is installed inside Packet Tracer; see [`docs/MCP_SETUP.md`](docs/MCP_SETUP.md).
+
+## Start and connect
+
+```bash
+./start_netstate.sh
+```
+
+The launcher starts the MCP server if port `39400` is not already in use, attempts to launch Packet Tracer, and starts the Streamlit interface (default `http://127.0.0.1:8501`). A different port can be selected explicitly:
+
+```bash
+NETSTATE_PORT=8507 ./start_netstate.sh
+```
+
+In Packet Tracer, open **Extensions → MCP BUILDER** and confirm that the bridge is connected. In NetState, click **Connect & inspect MCP**. A reachable HTTP endpoint alone does not prove the Packet Tracer bridge is connected.
+
+Stop NetState-managed processes with:
+
+```bash
+./stop_netstate.sh
+```
+
+Packet Tracer itself is intentionally left open.
+
+## First-run workflow
+
+1. Start Packet Tracer and confirm the MCP BUILDER bridge is connected.
+2. Start NetState and click **Connect & inspect MCP**.
+3. Open **Topology discovery** and discover the live devices, interfaces and links. Use automatic topology planning only if the required MCP tools are available and you have reviewed the plan.
+4. Open **Intent, mapping & configure**. Map the logical roles in `config/intent.example.yaml` to the actual discovered devices and interfaces. Review the generated command plan before any configuration change.
+5. Open **Drift & reconciliation** and save the mapped intent as the desired state.
+6. Run **Analyze live configuration drift**. Confirm that the supported ACL-attachment control is compliant before introducing a change.
+7. Save a separate copy of your `.pkt` lab. Open **Drift simulation**, select the intended guest ACL attachment, review the preconditions, and explicitly approve the controlled change.
+8. Return to **Drift & reconciliation**. Analyze again, inspect the detected difference, review the one-purpose remediation command, and approve it.
+9. Confirm that the new running-config read-back reports `VERIFIED`. Repeat appropriate connectivity tests and inspect ACL counters to corroborate the policy behaviour.
+
+For the exact ACL demonstration, see [`docs/DRIFT_RECONCILIATION.md`](docs/DRIFT_RECONCILIATION.md) and [`docs/DEMO_RUNBOOK.md`](docs/DEMO_RUNBOOK.md).
+
+## Testing
+
+```bash
 source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e '.[dev]'
+python -m compileall -q app.py src
+python -m pytest -q
 ```
 
-If the project is in another directory, use that path rather than `~/projects/netstate-reconciler`.
+The automated suite tests parsing, intent validation, topology mapping, MCP response handling, configuration compilation, drift analysis, controlled simulation, remediation planning and read-back logic. Unit tests do not replace a live acceptance test against the exact Packet Tracer model, MCP server and extension installed on the target machine.
 
-Validate the example desired state:
-
-```bash
-netstate validate --desired configs/router1.yaml
-```
-
-Audit the supplied baseline fixture (expected: `COMPLIANT`):
-
-```bash
-netstate audit \
-  --desired configs/router1.yaml \
-  --source tests/fixtures/router1_running.txt
-```
-
-Audit a fixture containing intentional drift (expected: `NON-COMPLIANT`, exit status 1):
-
-```bash
-netstate audit \
-  --desired configs/router1.yaml \
-  --source tests/fixtures/router1_with_drift.txt \
-  --json-output reports/drift-report.json
-```
-
-Print a remediation plan without executing commands:
-
-```bash
-netstate plan \
-  --desired configs/router1.yaml \
-  --source tests/fixtures/router1_with_drift.txt \
-  --json-output reports/remediation-plan.json
-```
-
-Run tests:
-
-```bash
-pytest
-```
-
-## Cisco Packet Tracer workflow
-
-1. Build a small topology in Packet Tracer and configure your router.
-2. On the router CLI, run `show running-config`.
-3. Copy the complete configuration output (or at least the supported relevant sections) into a local UTF-8 text file, for example `live_configs/router1_running.txt`.
-4. Create/edit a YAML specification under `configs/` to describe the approved state.
-5. Run `netstate audit --desired configs/router1.yaml --source live_configs/router1_running.txt`.
-6. Introduce one controlled drift in Packet Tracer, export the configuration again, and rerun the audit to demonstrate detection.
-7. Review the plan output. The file mode is intentionally read-only; it cannot push corrections to Packet Tracer.
-
-The included `tests/fixtures/` files are synthetic sample outputs, not captured from a physical router. Replace them with your own Packet Tracer output for your project demonstration.
-
-## Optional SSH workflow
-
-The SSH collector/executor is for Cisco IOS devices or virtual lab devices that expose a supported SSH CLI. It is not guaranteed to work with Packet Tracer.
-
-Install the optional dependency:
-
-```bash
-python -m pip install -e '.[ssh]'
-```
-
-Set credentials through the environment (or supply the username and enter the password at the prompt):
-
-```bash
-export NETSTATE_USERNAME='your-username'
-# Optional: store these in a private shell/session only; do not commit secrets.
-export NETSTATE_PASSWORD='your-password'
-# Only if enable mode is required:
-export NETSTATE_ENABLE_SECRET='your-enable-secret'
-```
-
-Audit a device:
-
-```bash
-netstate audit --desired configs/router1.yaml --host 192.0.2.10
-```
-
-Generate a plan against a device:
-
-```bash
-netstate plan --desired configs/router1.yaml --host 192.0.2.10
-```
-
-The executor requires `--confirm`, applies only actions explicitly marked auto-applicable by the planner, and performs a follow-up audit. Review the plan first and use an isolated lab. Do not test remediation on a production router. The current conservative planner does **not** automatically apply ACL/OSPF changes, interface addressing, interface shutdown/no-shutdown, or ACL-binding changes.
-
-## Desired-state YAML
-
-`configs/router1.yaml` is the complete example. The schema supports:
-
-```yaml
-hostname: Router1
-strict: false
-interfaces:
-  GigabitEthernet0/0:
-    description: Uplink to LAN
-    ipv4_address: 192.168.1.1
-    ipv4_mask: 255.255.255.0
-    admin_state: up
-    access_groups:
-      in: "100"
-acls:
-  "100":
-    type: extended
-    entries:
-      - permit ip 10.0.0.0 0.255.255.255 any
-      - deny ip any any log
-ospf:
-  "1":
-    router_id: 1.1.1.1
-    networks:
-      - network: 192.168.1.0
-        wildcard: 0.0.0.255
-        area: "0"
-```
-
-Only declared fields are managed. Fields omitted from a desired-state file are not checked, unless `strict: true` is enabled for resource-level checks of undeclared interfaces, ACLs, and OSPF processes. ACL entry order must match because IOS access lists are ordered rules. Avoid declaring only some ACL lines if the intent is to validate the entire ACL.
-
-## CLI reference
+## Project layout
 
 ```text
-netstate validate --desired PATH
-netstate audit --desired PATH (--source FILE | --host HOST) [--json-output FILE]
-netstate plan  --desired PATH (--source FILE | --host HOST) [--json-output FILE]
-netstate apply --desired PATH --host HOST --confirm [--username USER] [--json-output FILE]
+NetState-Reconciler/
+├── app.py
+├── config/
+│   ├── intent.example.yaml
+│   └── intent.attack-demo-baseline.yaml
+├── docs/
+│   ├── ARCHITECTURE.md
+│   ├── DEMO_RUNBOOK.md
+│   ├── DRIFT_RECONCILIATION.md
+│   ├── MCP_SETUP.md
+│   └── SAFETY_AND_LIMITATIONS.md
+├── src/netstate_reconciler/
+│   ├── binding.py
+│   ├── compiler.py
+│   ├── config_drift.py
+│   ├── deployment.py
+│   ├── drift.py
+│   ├── engine.py
+│   ├── intent.py
+│   ├── mcp_client.py
+│   ├── models.py
+│   ├── reconcile.py
+│   ├── security.py
+│   └── topology.py
+├── tests/
+├── tools/
+├── install.sh
+├── start_netstate.sh
+└── stop_netstate.sh
 ```
 
-Exit codes: `0` means the audit is compliant (or validation succeeded); `1` means drift remains; `2` means invalid input or an operational error. A drift exit status of 1 is expected during demonstrations where drift is intentionally introduced.
+## Runtime data and secrets
 
-## Current parser coverage and limitations
+Runtime state, mappings, checkpoints, snapshots and reports are stored locally under `.netstate/`; logs are stored under `logs/`. These directories are excluded from Git because checkpoints and reports can contain sensitive device configuration. `.env` is also excluded. Do not commit real passwords, tokens, private keys, Packet Tracer project files containing sensitive lab information, or raw configuration captures. Use disposable credentials in classroom labs.
 
-This version models a defined subset of IOS configuration, not every IOS command or platform. It does not fully model secondary IPv4 addresses, DHCP addressing, IPv6, NAT, BGP, route maps, VRFs, VLAN trunking, AAA, all ACL syntax variants, or operational state such as physical link-up. Secondary/DHCP interface addressing produces a parser warning. An audit with parser warnings requires human review; a clean result is only as complete as the parser's supported configuration model.
+The example YAML files contain demonstration addressing and logical device names, not credentials. Copy and adapt them for your topology; device names and interfaces must be mapped from live discovery.
 
-The current desired-state comparison treats lists as ordered and dictionaries as a set of managed keys. It does not prove full network reachability or formally verify that an ACL's effective policy meets a business security intent. `strict: true` catches extra resources but does not treat every unmodeled command as drift. Version 0.2.0 warns on known security/routing-sensitive global features and unknown commands inside modeled interface/OSPF contexts; an audit with parser warnings is marked incomplete and must not be treated as a clean compliance result. Some out-of-scope global commands are intentionally not flagged, and this is not a complete whole-device security audit.
+## Contributing
 
-## Repository layout
-
-```text
-src/netstate/
-  cli.py                         CLI and workflow orchestration
-  configuration.py               YAML loading and validation
-  models.py                       Drift/action/report models
-  collectors/file.py              Saved config input
-  collectors/netmiko_collector.py Optional SSH collection
-  parsers/ios.py                  Cisco IOS running-config parser
-  reconciler/diff.py              Desired/actual comparison
-  remediation/planner.py          Proposed commands and risk boundaries
-  remediation/executor.py         Confirmed execution of safe actions
-configs/router1.yaml               Example desired state
-tests/fixtures/                   Synthetic Cisco IOS configuration samples
-tests/                             Unit tests
-```
-
-## Version 0.2.0 changes
-
-- Unknown interface and OSPF subcommands now generate parser warnings instead of being silently ignored.
-- Selected out-of-scope global features that can affect security or routing (for example, AAA, local users, management access, static routes, NAT, and alternate routing protocols) generate warnings.
-- Common Packet Tracer `duplex` and `speed` defaults are ignored intentionally; they are not managed properties in this schema.
-- Invalid non-contiguous IPv4 subnet masks and invalid ACL binding directions are rejected during desired-state validation.
-- Explicit `null` for supported nullable properties matches an absent configuration field.
-- Numbered ACL remediation plans rebuild the full ordered entry list when order differs, rather than only adding/removing set-membership differences. ACL modifications remain manual-review-only.
-- Regression suite expanded from 13 to 22 tests.
-
-## Suggested next engineering improvements
-
-1. Add parser fixtures captured from multiple IOS/IOSv versions and a version-labelled test corpus.
-2. Add stateful integration tests using a virtual IOS-compatible lab.
-3. Build a remediation transaction model with checkpoints, rollback, and device-specific capability policies.
-4. Add topology-aware validation and policy invariants, then measure false positives and false negatives on a labelled test corpus.
-5. Add multi-device inventory and repeatable scheduled audits after device collection has been verified.
+Issues and pull requests are welcome. Read [`CONTRIBUTING.md`](CONTRIBUTING.md) before changing parser, compiler, reconciliation or transaction behaviour. Any new automatic remediation control should include parser fixtures, positive and negative drift tests, refusal tests for incomplete evidence, and post-change read-back tests.
 
 ## License
 
-MIT. See `LICENSE`.
-
-## v0.3.0 advanced capabilities
-
-See [`docs/V0.3.0.md`](docs/V0.3.0.md) for details and evidence limitations.
-
-- Driver-agnostic remediation transactions with explicit approval, capability policies, checkpoints, verification, and rollback behavior (`netstate.transactions`).
-- Basic topology invariants (`netstate.topology`).
-- Labelled corpus evaluation and false-positive/false-negative metrics (`netstate-evaluate-corpus`).
-- Multi-device inventory and read-only SSH audits (`netstate.inventory`) with secrets sourced from environment variables.
-- Repeatable scheduled audits (`netstate-scheduled-audit`).
-- Opt-in live IOS-compatible SSH integration test.
-
-The bundled version-labelled fixtures are synthetic IOS-style samples, not real captures. The stateful virtual IOS test is skipped unless an SSH lab is configured. Do not claim real IOS release compatibility or real-device rollback validation until those tests have actually run against the target images.
+MIT. See [`LICENSE`](LICENSE).
